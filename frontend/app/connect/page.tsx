@@ -13,8 +13,8 @@ export default function ConnectPage() {
     setMessage('')
     
     try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/seed/mock_subs`)
-      setMessage(`✅ ${response.data.message}. Detected ${response.data.detected_subscriptions} subscriptions.`)
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/mock_tasks`)
+      setMessage(`✅ ${response.data.message}. Created ${response.data.tasks_created} tasks.`)
     } catch (error) {
       setMessage('❌ Error seeding mock data. Please try again.')
       console.error('Error:', error)
@@ -23,8 +23,23 @@ export default function ConnectPage() {
     }
   }
 
-  const handleGmailConnect = () => {
-    setMessage('🔗 Gmail connection is in demo mode. In a real implementation, this would open OAuth flow.')
+  const handleGmailConnect = async () => {
+    setIsLoading(true)
+    setMessage('')
+    
+    try {
+      // First, get the auth URL
+      const authResponse = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/gmail/auth`)
+      
+      // For demo purposes, directly fetch mock emails
+      const fetchResponse = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/gmail/fetch`)
+      setMessage(`✅ ${fetchResponse.data.message}. Processed ${fetchResponse.data.emails_processed} emails.`)
+    } catch (error) {
+      setMessage('❌ Error connecting to Gmail. Please try again.')
+      console.error('Error:', error)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleFileUpload = async () => {
@@ -112,14 +127,15 @@ export default function ConnectPage() {
             </div>
             <div>
               <h2 className="text-xl font-semibold text-gray-900">Connect Gmail (Demo)</h2>
-              <p className="text-gray-600">Connect your Gmail to automatically import receipts</p>
+              <p className="text-gray-600">Connect your Gmail to automatically import tasks and receipts</p>
             </div>
           </div>
           <button
             onClick={handleGmailConnect}
+            disabled={isLoading}
             className="btn btn-secondary"
           >
-            Connect Gmail (Demo)
+            {isLoading ? 'Connecting...' : 'Connect Gmail (Demo)'}
           </button>
         </div>
 

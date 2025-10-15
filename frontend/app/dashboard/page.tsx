@@ -10,6 +10,7 @@ interface Task {
   category: string
   due_date?: string
   priority_score: number
+  priority_level?: 'High' | 'Medium' | 'Low' | null
   confidence_score: number
   source: string
   source_details?: any
@@ -30,14 +31,28 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [actionMessage, setActionMessage] = useState('')
+  const [connectedEmail, setConnectedEmail] = useState<string | null>(null)
+  const [needsReauth, setNeedsReauth] = useState<boolean>(false)
 
   useEffect(() => {
     fetchDashboardData()
+    fetchSession()
   }, [])
+
+  const fetchSession = async () => {
+    try {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/me`, { withCredentials: true })
+      setConnectedEmail(res.data.email || null)
+      setNeedsReauth(!!res.data.needs_reauth)
+    } catch (e) {
+      setConnectedEmail(null)
+      setNeedsReauth(false)
+    }
+  }
 
   const fetchDashboardData = async () => {
     try {
-      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/tasks`)
+      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/tasks`, { withCredentials: true })
       setDashboardData(response.data)
     } catch (error) {
       setError('Failed to load dashboard data')
@@ -47,24 +62,10 @@ export default function DashboardPage() {
     }
   }
 
-  const handleAction = async (taskId: number, action: string) => {
+  const handleAction = async (taskId: number, action: 'cancel' | 'snooze' | 'autopay') => {
     try {
-      let response
-      switch (action) {
-        case 'cancel':
-          response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/tasks/${taskId}/cancel`)
-          break
-        case 'snooze':
-          response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/tasks/${taskId}/snooze`)
-          break
-        case 'auto-pay':
-          response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/tasks/${taskId}/auto-pay`)
-          break
-        default:
-          return
-      }
-      
-      setActionMessage(`✅ ${response.data.message}`)
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/tasks/${taskId}/action`, { action }, { withCredentials: true })
+      setActionMessage(`✅ Updated: ${response.data.name}`)
       setTimeout(() => setActionMessage(''), 5000)
       
       // Refresh dashboard data
@@ -96,9 +97,9 @@ export default function DashboardPage() {
     return 'text-danger-600 bg-danger-100'
   }
 
-  const getPriorityColor = (score: number) => {
-    if (score >= 0.8) return 'text-danger-600 bg-danger-100'
-    if (score >= 0.6) return 'text-warning-600 bg-warning-100'
+  const getPriorityBadgeColor = (level?: string | null) => {
+    if (level === 'High') return 'text-danger-600 bg-danger-100'
+    if (level === 'Medium') return 'text-warning-600 bg-warning-100'
     return 'text-success-600 bg-success-100'
   }
 
@@ -144,7 +145,28 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <div className="flex items-center space-x-4">
+          <a href="/smart-inbox" className="btn btn-primary btn-sm">
+            Smart Inbox
+          </a>
+          <div className="text-sm">
+            {connectedEmail ? (
+              <div className="flex items-center space-x-3">
+                <span className="text-gray-700">Connected to Gmail: {connectedEmail}</span>
+                {needsReauth ? (
+                  <a href={`${process.env.NEXT_PUBLIC_API_URL}/auth/google/start`} className="btn btn-secondary btn-sm">Reconnect Gmail</a>
+                ) : (
+                  <button onClick={async () => { await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/auth/google/revoke`, {}, { withCredentials: true }); fetchSession() }} className="btn btn-secondary btn-sm">Revoke access</button>
+                )}
+              </div>
+            ) : (
+              <a href="/connect" className="btn btn-primary btn-sm">Connect Gmail</a>
+            )}
+          </div>
+        </div>
+      </div>
       
       {actionMessage && (
         <div className={`p-4 rounded-lg mb-6 ${
@@ -194,9 +216,7 @@ export default function DashboardPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Due Date
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Priority
-                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Confidence
                 </th>
@@ -235,8 +255,8 @@ export default function DashboardPage() {
                     {task.due_date ? formatDate(task.due_date) : 'N/A'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getPriorityColor(task.priority_score)}`}>
-                      {Math.round(task.priority_score * 100)}%
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getPriorityBadgeColor(task.priority_level)}`}>
+                      {task.priority_level || 'N/A'}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -245,12 +265,12 @@ export default function DashboardPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <button
-                      onClick={() => setSelectedTask(task)}
-                      className="text-xs text-primary-600 hover:text-primary-700 underline"
-                    >
-                      View Source
-                    </button>
+                    <button onClick={async () => {
+                      try {
+                        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/task/${task.id}/source`, { withCredentials: true })
+                        setSelectedTask({...task, source_details: res.data})
+                      } catch (e) { console.error(e) }
+                    }} className="text-xs text-primary-600 hover:text-primary-700 underline">View Source</button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                     <button

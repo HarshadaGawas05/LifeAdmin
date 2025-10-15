@@ -220,6 +220,11 @@ docker-compose -f docker-compose.prod.yml up -d
 docker-compose -f docker-compose.prod.yml up -d --scale worker=3
 ```
 
+### Security
+- Tokens encrypted with `cryptography.Fernet` using `ENCRYPTION_KEY` from `.env` stored in `oauth_tokens`.
+- Request only minimum Gmail scope: `https://www.googleapis.com/auth/gmail.readonly`.
+- To delete user data: remove rows from `oauth_tokens`, `raw_emails`, `parsed_events`, and related `tasks`.
+
 ### Environment Configuration
 - Set production environment variables
 - Configure proper database credentials

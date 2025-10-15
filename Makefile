@@ -1,4 +1,4 @@
-.PHONY: up down seed demo test logs clean
+.PHONY: up down seed demo test logs clean migrate
 
 # Start all services
 up:
@@ -10,7 +10,10 @@ down:
 
 # Seed database with mock data
 seed:
-	docker-compose exec api python -c "import requests; requests.post('http://localhost:8000/seed/mock_subs')"
+	docker-compose exec api python -c "import requests; requests.post('http://localhost:8000/tasks/seed')"
+## Run Alembic migrations
+migrate:
+	docker-compose exec api alembic upgrade head
 
 # Run full demo workflow
 demo: up

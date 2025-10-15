@@ -1,13 +1,39 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON, UniqueConstraint, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 from typing import Optional
 import json
+import enum
 
 Base = declarative_base()
 
+
+class LLMStatus(enum.Enum):
+    """Enum for LLM processing status"""
+    PENDING = "pending"
+    CLASSIFIED = "classified"
+    FAILED = "failed"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    name = Column(String(255), nullable=True)
+    picture = Column(String(1024), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "email": self.email,
+            "name": self.name,
+            "picture": self.picture,
+        }
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -64,6 +90,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     name = Column(String(255), nullable=False, index=True)
     amount = Column(Float, nullable=True)  # Optional for non-financial tasks
     category = Column(String(100), nullable=False)  # "bill", "subscription", "assignment", "job_application"
@@ -78,7 +105,20 @@ class Task(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
+    user = relationship("User")
+
     def to_dict(self):
+        # Compute priority level based on due_date
+        priority_level = None
+        if self.due_date:
+            days = (self.due_date - datetime.utcnow()).days
+            if days <= 1:
+                priority_level = "High"
+            elif days <= 3:
+                priority_level = "Medium"
+            else:
+                priority_level = "Low"
+
         return {
             "id": self.id,
             "name": self.name,
@@ -86,6 +126,7 @@ class Task(Base):
             "category": self.category,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "priority_score": self.priority_score,
+            "priority_level": priority_level,
             "confidence_score": self.confidence_score,
             "source": self.source,
             "source_details": self.source_details,
@@ -105,4 +146,126 @@ class GmailToken(Base):
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class OAuthToken(Base):
+    """Generic OAuth token storage (encrypted refresh token)"""
+    __tablename__ = "oauth_tokens"
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(50), index=True)  # e.g., 'google'
+    user_id = Column(String(255), index=True)
+    email_address = Column(String(255), index=True)
+    access_token = Column(Text, nullable=True)
+    encrypted_refresh_token = Column(Text, nullable=False)
+    token_expiry = Column(DateTime, nullable=True)
+    scope = Column(Text, nullable=True)
+    needs_reauth = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        UniqueConstraint('provider', 'user_id', name='uq_provider_user'),
+    )
+
+
+class RawEmail(Base):
+    """Stores raw Gmail message metadata/snippet for auditing and source display"""
+    __tablename__ = "raw_emails"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    email_id = Column(String(255), nullable=False, unique=True, index=True)  # Gmail message id
+    thread_id = Column(String(255), nullable=True, index=True)
+    subject = Column(String(1024), nullable=True)
+    sender = Column(String(512), nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    snippet = Column(Text, nullable=True)
+    raw_payload = Column(JSON, nullable=True)
+    
+    # LLM Classification Fields
+    category = Column(String(100), nullable=True, index=True)  # Job Application, Subscription, etc.
+    priority = Column(String(20), nullable=True, index=True)   # High, Medium, Low
+    summary = Column(Text, nullable=True)                      # AI-generated summary
+    llm_status = Column(Enum(LLMStatus), default=LLMStatus.PENDING, index=True)
+    llm_processed_at = Column(DateTime, nullable=True)
+    llm_error = Column(Text, nullable=True)                    # Store error details if classification fails
+    
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
+
+    def to_dict(self):
+        """Convert RawEmail to dictionary for API responses"""
+        return {
+            "id": self.id,
+            "email_id": self.email_id,
+            "thread_id": self.thread_id,
+            "subject": self.subject,
+            "sender": self.sender,
+            "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "snippet": self.snippet,
+            "category": self.category,
+            "priority": self.priority,
+            "summary": self.summary,
+            "llm_status": self.llm_status.value if self.llm_status else None,
+            "llm_processed_at": self.llm_processed_at.isoformat() if self.llm_processed_at else None,
+            "llm_error": self.llm_error,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class ParsedEvent(Base):
+    """Parsed signals extracted from raw emails to power tasks and detection"""
+    __tablename__ = "parsed_events"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    name = Column(String(255), nullable=False, index=True)
+    amount = Column(Float, nullable=True)
+    currency = Column(String(8), nullable=True)
+    due_date = Column(DateTime, nullable=True)
+    category = Column(String(100), nullable=True)
+    confidence = Column(Float, default=0.0)
+    source = Column(String(50), default='gmail', nullable=False)
+    raw_email_id = Column(Integer, ForeignKey("raw_emails.id"), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    raw_email = relationship("RawEmail")
+    user = relationship("User")
+
+
+class Action(Base):
+    """Stores user actions taken on tasks (cancel, snooze, autopay)"""
+    __tablename__ = "actions"
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), index=True)
+    action = Column(String(50), nullable=False)  # cancel|snooze|autopay
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    task = relationship("Task")
+
+
+class ClassificationLog(Base):
+    """Logs classification attempts and errors for debugging"""
+    __tablename__ = "classification_logs"
+
+    id = Column(Integer, primary_key=True)
+    email_id = Column(Integer, ForeignKey("raw_emails.id"), index=True, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    subject = Column(String(1024), nullable=True)
+    body_snippet = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False)  # success, failed, retry
+    error_message = Column(Text, nullable=True)
+    response_data = Column(JSON, nullable=True)
+    processing_time_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    email = relationship("RawEmail")
+    user = relationship("User")
 

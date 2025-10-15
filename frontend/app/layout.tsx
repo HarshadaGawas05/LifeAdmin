@@ -39,6 +39,12 @@ export default function RootLayout({
                   >
                     Dashboard
                   </a>
+                  <a
+                    href="/smart-inbox"
+                    className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                  >
+                    Smart Inbox
+                  </a>
                 </div>
               </div>
             </div>

@@ -13,7 +13,7 @@ export default function ConnectPage() {
     setMessage('')
     
     try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/mock_tasks`)
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/tasks/seed`)
       setMessage(`✅ ${response.data.message}. Created ${response.data.tasks_created} tasks.`)
     } catch (error) {
       setMessage('❌ Error seeding mock data. Please try again.')
@@ -28,14 +28,25 @@ export default function ConnectPage() {
     setMessage('')
     
     try {
-      // First, get the auth URL
-      const authResponse = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/gmail/auth`)
-      
-      // For demo purposes, directly fetch mock emails
-      const fetchResponse = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/gmail/fetch`)
-      setMessage(`✅ ${fetchResponse.data.message}. Processed ${fetchResponse.data.emails_processed} emails.`)
+      // Redirect browser to backend to initiate OAuth
+      window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/google/start`
     } catch (error) {
       setMessage('❌ Error connecting to Gmail. Please try again.')
+      console.error('Error:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleGmailSync = async () => {
+    setIsLoading(true)
+    setMessage('')
+    
+    try {
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/sync/gmail`, {}, { withCredentials: true })
+      setMessage(`✅ Gmail sync completed! Processed ${response.data.synced?.raw_emails || 0} emails, created ${response.data.synced?.tasks || 0} tasks.`)
+    } catch (error) {
+      setMessage('❌ Error syncing Gmail. Please make sure you are connected first.')
       console.error('Error:', error)
     } finally {
       setIsLoading(false)
@@ -130,13 +141,22 @@ export default function ConnectPage() {
               <p className="text-gray-600">Connect your Gmail to automatically import tasks and receipts</p>
             </div>
           </div>
-          <button
-            onClick={handleGmailConnect}
-            disabled={isLoading}
-            className="btn btn-secondary"
-          >
-            {isLoading ? 'Connecting...' : 'Connect Gmail (Demo)'}
-          </button>
+          <div className="space-x-3">
+            <button
+              onClick={handleGmailConnect}
+              disabled={isLoading}
+              className="btn btn-secondary"
+            >
+              {isLoading ? 'Connecting...' : 'Connect Gmail'}
+            </button>
+            <button
+              onClick={handleGmailSync}
+              disabled={isLoading}
+              className="btn btn-primary"
+            >
+              {isLoading ? 'Syncing...' : 'Sync Gmail'}
+            </button>
+          </div>
         </div>
 
         {/* File Upload Option */}

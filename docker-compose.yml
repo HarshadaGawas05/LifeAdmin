@@ -45,6 +45,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://lifeadmin:lifeadmin@postgres:5432/lifeadmin
       - REDIS_URL=redis://redis:6379/0
@@ -52,6 +54,10 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-encryption-key-here}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-your-client-id}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-your-client-secret}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
+      - APP_JWT_SECRET=${APP_JWT_SECRET:-dev-secret}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-AIzaSyDRPAG8FyY2imcFN7C3tREa6RtIEW8frrI}
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,6 +73,8 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://lifeadmin:lifeadmin@postgres:5432/lifeadmin
       - REDIS_URL=redis://redis:6379/0
@@ -74,6 +82,9 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-encryption-key-here}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-your-client-id}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-your-client-secret}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
+      - APP_JWT_SECRET=${APP_JWT_SECRET:-dev-secret}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-AIzaSyDRPAG8FyY2imcFN7C3tREa6RtIEW8frrI}
     depends_on:
       postgres:
         condition: service_healthy

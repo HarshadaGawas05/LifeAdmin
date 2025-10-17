@@ -5,6 +5,7 @@ Email classification API routes
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
+import time
 import logging
 
 from database import get_db
@@ -38,6 +39,55 @@ async def classify_email(
         return classification
     except Exception as e:
         logger.error(f"Email classification failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Classification failed: {str(e)}")
+
+
+# Root-level endpoint compatible with requirement: /classify_email
+@router.post("/classify_email")
+async def classify_email_simple(
+    request: EmailClassificationRequest,
+    db: Session = Depends(get_db),
+    classifier: EmailClassifier = Depends(lambda: EmailClassifier()),
+):
+    """
+    Classify an email payload and persist to the nearest matching RawEmail if found; otherwise create a minimal record.
+    Returns the JSON classification output and sets llm_status accordingly.
+    """
+    try:
+        # Try to find an unclassified RawEmail matching subject snippet
+        email = (
+            db.query(RawEmail)
+            .filter(RawEmail.subject == request.subject)
+            .first()
+        )
+
+        if not email:
+            # Create minimal RawEmail record
+            email = RawEmail(
+                email_id=f"manual-{int(time.time())}",
+                subject=request.subject,
+                snippet=(request.body or "")[:500],
+                llm_status=LLMStatus.PENDING,
+            )
+            db.add(email)
+            db.commit()
+            db.refresh(email)
+
+        success = classifier.classify_and_store(db, email)
+        if not success:
+            raise HTTPException(status_code=500, detail="Classification failed")
+
+        return {
+            "category": email.category,
+            "priority": email.priority,
+            "summary": email.summary,
+            "email_id": email.id,
+            "status": email.llm_status.value,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Simple classify_email failed: {e}")
         raise HTTPException(status_code=500, detail=f"Classification failed: {str(e)}")
 
 

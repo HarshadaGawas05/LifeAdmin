@@ -65,35 +65,7 @@ class EmailClassifier:
         
         # Configure Gemini
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        # Classification prompt
-        self.classification_prompt = """You are an email classification AI. Classify the following email into a category, assign a priority, and generate a concise summary. **Always return a valid JSON object**. Do not add extra text, explanations, or quotes outside the JSON.
-
-Email Subject: "{subject}"
-Email Body: "{body}"
-
-Categories:
-- Job Application
-- Subscription
-- Renewal
-- Bill
-- Reminder
-- Offer
-- Spam
-- Other
-
-Priority Rules:
-- High: Urgent matters or deadlines within 3 days
-- Medium: Important but not urgent, deadlines within a week
-- Low: Informational / non-urgent
-
-JSON Output Format:
-{{
-  "category": "<choose one category from the list>",
-  "priority": "<High / Medium / Low>",
-  "summary": "<Concise human-readable summary of the email>"
-}}"""
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
     
     def classify_email(self, subject: str, body: str, db: Session = None, email_id: int = None, user_id: int = None) -> EmailClassificationResponse:
         """
@@ -115,35 +87,35 @@ JSON Output Format:
         start_time = time.time()
         
         try:
-            # Prepare the prompt
-            prompt = self.classification_prompt.format(
-                subject=subject[:500],  # Limit subject length
-                body=body[:2000]        # Limit body length to stay within token limits
+            # Prepare the structured prompt
+            system_instruction = (
+                "You are an expert email sorter for a productivity application. "
+                "Analyze the subject and body of the following email. Strictly adhere to the provided JSON schema for your response."
             )
-            
-            # Generate response with structured output
+
             response = self.model.generate_content(
-                prompt,
+                [
+                    system_instruction,
+                    {
+                        "role": "user",
+                        "parts": [
+                            f"Subject: {subject[:500]}",
+                            f"Body: {body[:4000]}"
+                        ]
+                    }
+                ],
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.2,  # Low temperature for consistent results
-                    max_output_tokens=500,
+                    temperature=0.2,
+                    max_output_tokens=256,
+                    response_mime_type="application/json",
+                    response_schema=EmailClassificationResponse
                 )
             )
-            
-            # Parse the response
-            response_text = response.text.strip()
-            
-            # Extract JSON from the response with robust parsing
-            classification_data = self._extract_json_from_response(response_text)
-            
-            # Normalize field names to lowercase
-            normalized_data = {}
-            for key, value in classification_data.items():
-                normalized_key = key.lower()
-                normalized_data[normalized_key] = value
-            
-            # Validate and create response
-            result = EmailClassificationResponse(**normalized_data)
+
+            # The SDK returns structured JSON directly
+            payload = response.text
+            data = json.loads(payload)
+            result = EmailClassificationResponse(**data)
             
             # Log successful classification
             if db:
@@ -182,69 +154,7 @@ JSON Output Format:
             
             return result
     
-    def _extract_json_from_response(self, response_text: str) -> dict:
-        """Extract JSON from response text with robust parsing"""
-        import re
-        
-        # Try multiple extraction methods
-        methods = [
-            # Method 1: Extract from ```json code blocks
-            lambda text: self._extract_from_code_block(text, '```json'),
-            # Method 2: Extract from ``` code blocks
-            lambda text: self._extract_from_code_block(text, '```'),
-            # Method 3: Extract JSON between { and }
-            lambda text: self._extract_json_between_braces(text),
-            # Method 4: Use regex to find JSON-like structure
-            lambda text: self._extract_json_with_regex(text)
-        ]
-        
-        for method in methods:
-            try:
-                result = method(response_text)
-                if result:
-                    logger.info(f"Successfully extracted JSON using method: {method.__name__}")
-                    return result
-            except Exception as e:
-                logger.debug(f"Method {method.__name__} failed: {e}")
-                continue
-        
-        # If all methods fail, raise an exception
-        raise ValueError(f"Could not extract valid JSON from response: {response_text[:200]}")
-    
-    def _extract_from_code_block(self, text: str, marker: str) -> dict:
-        """Extract JSON from code blocks"""
-        if marker not in text:
-            return None
-            
-        start = text.find(marker) + len(marker)
-        end = text.find('```', start)
-        if end == -1:
-            return None
-            
-        json_text = text[start:end].strip()
-        return json.loads(json_text)
-    
-    def _extract_json_between_braces(self, text: str) -> dict:
-        """Extract JSON between first { and last }"""
-        start = text.find('{')
-        end = text.rfind('}')
-        if start == -1 or end == -1 or start >= end:
-            return None
-            
-        json_text = text[start:end+1].strip()
-        return json.loads(json_text)
-    
-    def _extract_json_with_regex(self, text: str) -> dict:
-        """Extract JSON using regex pattern"""
-        import re
-        
-        # Look for JSON-like pattern
-        pattern = r'\{[^{}]*"category"[^{}]*"priority"[^{}]*"summary"[^{}]*\}'
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            json_text = match.group(0)
-            return json.loads(json_text)
-        return None
+    # Legacy JSON extraction helpers removed due to structured output usage
     
     def _create_fallback_response(self, subject: str) -> EmailClassificationResponse:
         """Create a fallback response when classification fails"""
@@ -315,15 +225,33 @@ JSON Output Format:
             return True
             
         except Exception as e:
-            # Mark as failed
-            raw_email.llm_status = LLMStatus.FAILED
-            raw_email.llm_processed_at = datetime.utcnow()
-            raw_email.llm_error = str(e)
-            
-            db.commit()
-            
-            logger.error(f"Failed to classify email {raw_email.id}: {e}")
-            return False
+            # Retry once
+            logger.warning(f"Classification failed for email {raw_email.id}, retrying once: {e}")
+            try:
+                classification = self.classify_email(
+                    raw_email.subject or "",
+                    raw_email.snippet or "",
+                    db,
+                    raw_email.id,
+                    raw_email.user_id,
+                )
+                raw_email.category = classification.category.value
+                raw_email.priority = classification.priority.value
+                raw_email.summary = classification.summary
+                raw_email.llm_status = LLMStatus.CLASSIFIED
+                raw_email.llm_processed_at = datetime.utcnow()
+                raw_email.llm_error = None
+                db.commit()
+                logger.info(f"Successfully classified on retry {raw_email.id}")
+                return True
+            except Exception as e2:
+                # Mark as failed after retry
+                raw_email.llm_status = LLMStatus.FAILED
+                raw_email.llm_processed_at = datetime.utcnow()
+                raw_email.llm_error = str(e2)
+                db.commit()
+                logger.error(f"Failed to classify email {raw_email.id} after retry: {e2}")
+                return False
     
     def batch_classify_pending_emails(self, db: Session, limit: int = 50) -> Dict[str, int]:
         """

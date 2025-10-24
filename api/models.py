@@ -174,13 +174,17 @@ class RawEmail(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
-    email_id = Column(String(255), nullable=False, unique=True, index=True)  # Gmail message id
+    message_id = Column(String(255), nullable=False, unique=True, index=True)  # Gmail message id
     thread_id = Column(String(255), nullable=True, index=True)
+    history_id = Column(String(255), nullable=True, index=True)  # Gmail history ID
     subject = Column(String(1024), nullable=True)
     sender = Column(String(512), nullable=True)
-    sent_at = Column(DateTime, nullable=True)
+    recipient = Column(String(512), nullable=True)  # Added recipient field
+    received_at = Column(DateTime, nullable=True)  # Renamed from sent_at
+    body = Column(Text, nullable=True)  # Added body field
     snippet = Column(Text, nullable=True)
     raw_payload = Column(JSON, nullable=True)
+    is_deleted = Column(Boolean, default=False, index=True)  # Track deleted emails
     
     # LLM Classification Fields
     category = Column(String(100), nullable=True, index=True)  # Job Application, Subscription, etc.
@@ -199,12 +203,16 @@ class RawEmail(Base):
         """Convert RawEmail to dictionary for API responses"""
         return {
             "id": self.id,
-            "email_id": self.email_id,
+            "message_id": self.message_id,
             "thread_id": self.thread_id,
+            "history_id": self.history_id,
             "subject": self.subject,
             "sender": self.sender,
-            "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "recipient": self.recipient,
+            "received_at": self.received_at.isoformat() if self.received_at else None,
+            "body": self.body,
             "snippet": self.snippet,
+            "is_deleted": self.is_deleted,
             "category": self.category,
             "priority": self.priority,
             "summary": self.summary,
@@ -267,5 +275,19 @@ class ClassificationLog(Base):
     created_at = Column(DateTime, default=func.now())
 
     email = relationship("RawEmail")
+    user = relationship("User")
+
+
+class GmailSyncState(Base):
+    """Tracks Gmail sync state for incremental updates"""
+    __tablename__ = "gmail_sync_state"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    last_history_id = Column(String(255), nullable=True)  # Gmail history ID for incremental sync
+    last_synced_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
     user = relationship("User")
 

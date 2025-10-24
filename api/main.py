@@ -17,6 +17,7 @@ from receipt_parser import ReceiptParser
 from production_gmail_integration import ProductionGmailIntegration
 from celery_app import celery
 from routes.email_routes import router as email_router
+from routes.gmail_routes import router as gmail_router
 import jwt
 import requests
 
@@ -42,6 +43,9 @@ app.add_middleware(
 
 # Include email classification routes
 app.include_router(email_router)
+
+# Include Gmail integration routes
+app.include_router(gmail_router)
 
 # Initialize parsers and detectors
 parser = ReceiptParser()

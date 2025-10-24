@@ -10,7 +10,7 @@ celery = Celery(
     "lifeadmin",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["main"]
+    include=["tasks", "main"]
 )
 
 celery.conf.update(
@@ -25,4 +25,12 @@ celery.conf.update(
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
 )
+
+# Attach beat schedule from dedicated config
+try:
+    from celery_beat_schedule import beat_schedule as _beat_schedule, timezone as _tz
+    celery.conf.beat_schedule = _beat_schedule
+    celery.conf.timezone = _tz
+except Exception:
+    pass
 

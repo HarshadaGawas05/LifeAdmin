@@ -107,6 +107,9 @@ async def get_emails(
     try:
         query = db.query(RawEmail)
         
+        # Filter out deleted emails by default (dashboard rule)
+        query = query.filter(RawEmail.is_deleted == False)
+        
         # Apply filters
         if category:
             query = query.filter(RawEmail.category == category)
